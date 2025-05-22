@@ -46,5 +46,5 @@ scMoAnno consists of two major stages:
 
 The datasets used in this project can be accessed via:
 
-👉 [Download Benchmark Datasets](https://pan.baidu.com/s/1kW3syxZDnv_qTagKUEFQIw?pwd=mynn) ← _Please click the download link._
+👉 [Download Benchmark Datasets](10.5281/zenodo.15487954) ← _Please click the download link._
 
