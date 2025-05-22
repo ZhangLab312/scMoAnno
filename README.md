@@ -4,6 +4,9 @@
 
 **scMoAnno** is a deep learning framework for accurate cell type annotation using paired single-cell multi-omics data (scRNA-seq + scATAC-seq). It addresses the limitations of single-omics data and improves generalization, especially in identifying rare cell types, through a two-stage supervised learning strategy.
 
+![scMoAnno-workflow_00](https://github.com/user-attachments/assets/8115e04c-82de-4e27-b028-d0bce04b1054)
+
+
 ## 🧠 Core Algorithm Strategy
 
 scMoAnno consists of two major stages:
