@@ -45,7 +45,7 @@ same_seeds(seed)
 root_path = '../data/'
 
 
-# # 取用于融合scRNA-seq和scATAC-seq表达量的数据集
+# # Dataset for fusing scRNA-seq and scATAC-seq expression values
 class Dataset_FusionRNATAC(Dataset):
     def __init__(self, data_rna, data_atac, label):
         self.data_rna = data_rna
@@ -69,13 +69,13 @@ def pretrain_fusion_feature(rna_path, atac_path, save_path, label_path):
     adata_rna = sc.read_h5ad(rna_path)
     adata_atac = sc.read_h5ad(atac_path)
 
-    # # 获取对齐的scRNA-seq和scATAC-seq数据的细胞类型标签
+    # # Get aligned cell type labels for scRNA-seq and scATAC-seq data
     if label_path != None:
         y_train = pd.read_csv(label_path)
         y_train = y_train.T
         y_train = y_train.values[0]
 
-        # 所有细胞种类清单（type1: A, type2: B, type3: C...）
+        # List of all cell types (type1: A, type2: B, type3: C...)
         cell_types = []
         labels = []
         for i in y_train:
@@ -84,47 +84,47 @@ def pretrain_fusion_feature(rna_path, atac_path, save_path, label_path):
                 cell_types.append(i)
             labels.append(cell_types.index(i))
 
-        # 所有细胞的种类（cell1: A, cell2: B, cell3: A...）
+        # Types for all cells (cell1: A, cell2: B, cell3: A...)
         labels = np.asarray(labels)
 
-        # 读取scRNA-seq和scATAC-seq数据
+        # Read scRNA-seq and scATAC-seq data
         # adata_rna = adata_rna.X
         adata_rna = csr_matrix(adata_rna.X).toarray()
         # adata_atac = adata_atac.X
         adata_atac = csr_matrix(adata_atac.X).toarray()
 
-    print('读完数据了')
+    print('Finished reading data')
 
-    # # 设置FusionRNATAC数据融合预训练模型的超参数
-    # 获取读入的scRNA-seq和scATAC-seq数据的特征维度(cell, feature)，所以shape[1]
+    # # Set hyperparameters for FusionRNATAC data fusion pretraining model
+    # Get feature dimensions of input scRNA-seq and scATAC-seq data (cell, feature), so shape[1]
     rna_input_size = adata_rna.shape[1]
     atac_input_size = adata_atac.shape[1]
     rna_output_size = rna_input_size
     atac_output_size = atac_input_size
-    # 数据融合后的特征维度
+    # Feature dimension after data fusion
     gap = 1024
 
-    lr = 0.0006  # 学习率
-    dp = 0.1  # 丢弃率
-    n_epochs = 50  # 预训练轮数
+    lr = 0.0006  # Learning rate
+    dp = 0.1  # Dropout rate
+    n_epochs = 50  # Pretraining epochs
     n_head = 32
 
     print('rna: ' + str(rna_input_size))
     print('atac: ' + str(atac_input_size))
 
-    # 将二维的矩阵转换成三维张量，后续进入Transformer编码器提取特征，并通过平均池化去掉gap_num的维度
+    # Convert 2D matrix to 3D tensor for subsequent Transformer encoder feature extraction and average pooling to remove gap_num dimension
     adata_rna_list = []
     for single_cell in adata_rna:
         feature = []
         length = len(single_cell)
-        # 将scATAC-seq的基因活性向量分割成一些子向量，其长度为 gap。
+        # Split scATAC-seq gene activity vector into sub-vectors of length 'gap'
         for k in range(0, length, gap):
             if (k + gap > length):
                 a = single_cell[length - gap:length]
             else:
                 a = single_cell[k:k + gap]
 
-            # 缩放每个子向量
+            # Scale each sub-vector
             a = preprocessing.scale(a, axis=0, with_mean=True, with_std=True, copy=True)
             feature.append(a)
 
@@ -137,14 +137,14 @@ def pretrain_fusion_feature(rna_path, atac_path, save_path, label_path):
     for single_cell in adata_atac:
         feature = []
         length = len(single_cell)
-        # 将scATAC-seq的基因活性向量分割成一些子向量，其长度为 gap。
+        # Split scATAC-seq gene activity vector into sub-vectors of length 'gap'
         for k in range(0, length, gap):
             if (k + gap > length):
                 a = single_cell[length - gap:length]
             else:
                 a = single_cell[k:k + gap]
 
-            # 缩放每个子向量
+            # Scale each sub-vector
             a = preprocessing.scale(a, axis=0, with_mean=True, with_std=True, copy=True)
             feature.append(a)
 
@@ -153,30 +153,30 @@ def pretrain_fusion_feature(rna_path, atac_path, save_path, label_path):
 
     adata_atac_list = np.asarray(adata_atac_list)  # (n_cells, gap_num, gap)
 
-    # 创建进行数据融合预训练的模型
+    # Create model for data fusion pretraining
     model = scMoAnno(input_rna=rna_input_size, input_atac=atac_input_size, gap=gap, dropout=dp,
                      num_classes=len(cell_types), n_head=n_head).float().to(device)
 
     torch.set_default_tensor_type(torch.FloatTensor)
 
-    # 创建示例输入
-    gap_num = math.ceil(rna_input_size / gap)  # 计算 sequence_length
+    # Create example input
+    gap_num = math.ceil(rna_input_size / gap)  # Calculate sequence_length
     example_rna_input = torch.randn(1, gap_num, gap).to(device)  # (batch_size, sequence_length, feature_dim)
     example_atac_input = torch.randn(1, gap_num, gap).to(device)  # (batch_size, sequence_length, feature_dim)
 
-    # 计算 FLOPS 和参数量
+    # Calculate FLOPS and number of parameters
     flops, params = profile(model, inputs=(example_rna_input, example_atac_input))
 
-    # 打印结果
+    # Print results
     print(f"FLOPS: {flops / 1e9:.5f} GFLOPs")
     print(f"Number of parameters: {params / 1e6:.5f} M")
 
-    # 设置损失函数，因为是重构出原输入数据，所以使用均方差损失函数
+    # Set loss function (using cross entropy since we're doing classification)
     criterion = nn.CrossEntropyLoss()
-    # 设置优化器函数
+    # Set optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
 
-    # 根据细胞数量设置不同批次大小
+    # Set batch size based on number of cells
     len_all_data = adata_rna.shape[0]
     if len_all_data > 5000:
         batch_sizes = 512
@@ -294,7 +294,7 @@ def pretrain_fusion_feature(rna_path, atac_path, save_path, label_path):
             for i in y_predict:
                 y_predicts.append(cell_types[i])
 
-            # 保存预测的细胞类型和scMoAnno模型
+            # Save predicted cell types and scMoAnno model
             log_dir = save_path + "log/"
             if not os.path.isdir(log_dir):
                 os.makedirs(log_dir)
@@ -312,7 +312,7 @@ def pretrain_fusion_feature(rna_path, atac_path, save_path, label_path):
                 f.writelines("acc:" + str(all_acc) + "\n")
                 f.writelines('f1:' + str(all_f1) + "\n")
 
-        if fold == 1:
+        if fold == 5:
             break
 
 
