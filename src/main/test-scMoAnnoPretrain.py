@@ -1,4 +1,4 @@
-# # Import the required packages
+# Import the required packages
 import sklearn.model_selection
 import torch
 import torch.nn as nn
@@ -29,7 +29,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 import scipy
 
 
-##Set random seeds
+## Set random seeds
 def same_seeds(seed):
     random.seed(seed)
     # Numpy
@@ -46,7 +46,7 @@ same_seeds(seed)
 root_path = '../data/'
 
 
-# # 取用于融合scRNA-seq和scATAC-seq表达量的数据集
+# Dataset for fusing scRNA-seq and scATAC-seq expression data
 class Dataset_FusionRNATAC(Dataset):
     def __init__(self, data_rna, data_atac, label):
         self.data_rna = data_rna
@@ -65,13 +65,13 @@ class Dataset_FusionRNATAC(Dataset):
         return data_rna[index], data_atac[index], label[index]
 
 
-# # 读取细胞类型的真实标签
+# Read the true labels of cell types
 def read_label(label_path):
     y_train = pd.read_csv(label_path)
     y_train = y_train.T
     y_train = y_train.values[0]
 
-    # 所有细胞种类清单（type1: A, type2: B, type3: C...）
+    # List of all cell types (type1: A, type2: B, type3: C...)
     cell_types = []
     labels = []
     for i in y_train:
@@ -80,41 +80,37 @@ def read_label(label_path):
             cell_types.append(i)
         labels.append(cell_types.index(i))
 
-    # 所有细胞的种类（cell1: A, cell2: B, cell3: A...）
+    # Types of all cells (cell1: A, cell2: B, cell3: A...)
     return np.asarray(labels), cell_types
 
 
-# # 做多模态交叉注意力预训练
+# Perform multimodal cross-attention pretraining
 def pretrain(rna_path, atac_path, save_path, label_path):
     global labels, cell_types
     adata_rna = sc.read_h5ad(rna_path)
     adata_atac = sc.read_h5ad(atac_path)
 
-    # # 获取对齐的scRNA-seq和scATAC-seq数据的细胞类型标签
+    # Get the cell type labels of aligned scRNA-seq and scATAC-seq data
     if label_path is not None:
-        # 所有细胞的种类（cell1: A, cell2: B, cell3: A...）
+        # Types of all cells (cell1: A, cell2: B, cell3: A...)
         labels, cell_types = read_label(label_path)
 
-    # 读取scRNA-seq和scATAC-seq数据
-    # adata_rna = adata_rna.X
+    # Read scRNA-seq and scATAC-seq data
     adata_rna = csr_matrix(adata_rna.X).toarray()
-    # adata_atac = adata_atac.X
     adata_atac = csr_matrix(adata_atac.X).toarray()
 
-    print('读完数据了')
+    print('Data reading completed')
 
-    # # 设置FusionRNATAC数据融合预训练模型的超参数
-    # 获取读入的scRNA-seq和scATAC-seq数据的特征维度(cell, feature)，所以shape[1]
+    # Set hyperparameters for the FusionRNATAC data fusion pretraining model
     rna_input_size = adata_rna.shape[1]
     atac_input_size = adata_atac.shape[1]
     rna_output_size = rna_input_size
     atac_output_size = atac_input_size
-    # 数据融合后的特征维度
-    gap = 2048
+    gap = 2048  # Dimensionality of fused features
 
-    lr = 0.000068  # 学习率
-    dp = 0.1  # 丢弃率
-    n_epochs = 30  # 预训练轮数
+    lr = 0.000068  # Learning rate
+    dp = 0.1  # Dropout rate
+    n_epochs = 30  # Number of pretraining epochs
     n_head = 8
 
     adata_rna = np.asarray(adata_rna)
@@ -123,7 +119,7 @@ def pretrain(rna_path, atac_path, save_path, label_path):
     print('rna: ' + str(rna_input_size))
     print('atac: ' + str(atac_input_size))
 
-    # 创建交叉注意力模型
+    # Create a cross-attention model
     model = scMoAnnoPretrain(
         input_rna=rna_input_size,
         input_atac=atac_input_size,
@@ -133,33 +129,20 @@ def pretrain(rna_path, atac_path, save_path, label_path):
         n_head=n_head
     ).float().to(device)
 
-    # 设置损失函数，因为是重构出原输入数据，所以使用均方差损失函数
+    # Set the loss function, using cross-entropy loss for classification tasks
     criterion = nn.CrossEntropyLoss()
-    # 设置优化器函数
+    # Set the optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
 
-    # 根据细胞数量设置不同批次大小
-    # print(type(adata_rna))
+    # Set different batch sizes according to the number of cells
     batch_sizes = 512
 
-    # 模型设置5-KFold
+    # 5-KFold cross-validation setup
     skf = StratifiedKFold(n_splits=5, random_state=seed, shuffle=True)
     fold = 0
 
     for train_index, test_index in skf.split(adata_atac, labels):
         fold = fold + 1
-        # X_rna_train, X_rna_test = adata_rna[train_index], adata_rna[test_index]
-        # X_atac_train, X_atac_test = adata_atac[train_index], adata_atac[test_index]
-        # X_rna_train = np.asarray(X_rna_train)
-        # X_rna_test = np.asarray(X_rna_test)
-        # X_atac_train = np.asarray(X_atac_train)
-        # X_atac_test = np.asarray(X_atac_test)
-        #
-        # y_train, y_test = labels[train_index], labels[test_index]
-        #
-        # y_train = np.asarray(y_train)
-        # y_test = np.asarray(y_test)
-
         X_rna_train, X_rna_test, X_atac_train, X_atac_test, y_train, y_test = train_test_split(
             adata_rna, adata_atac, labels, test_size=0.2, random_state=seed, shuffle=True, stratify=labels
         )
@@ -170,15 +153,15 @@ def pretrain(rna_path, atac_path, save_path, label_path):
         y_train = np.asarray(y_train)
         y_test = np.asarray(y_test)
 
-        # 设置训练数据集
+        # Set up the training dataset
         train_dataset = Dataset_FusionRNATAC(data_rna=X_rna_train, data_atac=X_atac_train, label=y_train)
         train_loader = DataLoader(train_dataset, batch_size=batch_sizes, shuffle=True, pin_memory=True)
 
-        # 设置测试数据集
+        # Set up the test dataset
         test_dataset = Dataset_FusionRNATAC(data_rna=X_rna_test, data_atac=X_atac_test, label=y_test)
         test_loader = DataLoader(test_dataset, batch_size=batch_sizes, shuffle=False, pin_memory=True)
 
-        # # 开始训练
+        # Start training
         model.train()
         for index, epoch in enumerate(range(n_epochs)):
             train_loss = []
@@ -193,7 +176,7 @@ def pretrain(rna_path, atac_path, save_path, label_path):
                 data_atac = data_atac.to(device)
                 labels = labels.to(device)
 
-                # 设置成预训练模式，预训练模式会返回分别使用两种模态数据的预测结果
+                # Set to pretrain mode, which returns prediction results using both modal data
                 logits_rna, logits_atac = model(x_rna=data_rna, x_atac=data_atac, ope='pretrain')
                 labels = torch.tensor(labels, dtype=torch.long)
                 loss_rna = criterion(logits_rna, labels)
@@ -202,16 +185,16 @@ def pretrain(rna_path, atac_path, save_path, label_path):
                 loss = loss_rna + loss_atac
                 loss.backward()
                 optimizer.step()
-                # 获取使用rna模态数据的预测结果
+                # Get prediction results using RNA modal data
                 preds_rna = logits_rna.argmax(1)
                 preds_rna = preds_rna.cpu().numpy()
-                # 获取使用atac模态数据的预测结果
+                # Get prediction results using ATAC modal data
                 preds_atac = logits_atac.argmax(1)
                 preds_atac = preds_atac.cpu().numpy()
 
                 labels = labels.cpu().numpy()
 
-                # 计算评价指标
+                # Calculate evaluation metrics
                 acc_rna = accuracy_score(labels, preds_rna)
                 acc_atac = accuracy_score(labels, preds_atac)
                 f1_rna = f1_score(labels, preds_rna, average='macro')
@@ -236,7 +219,7 @@ def pretrain(rna_path, atac_path, save_path, label_path):
                 f"f1_atac = {train_f1_atac:.5f}"
             )
 
-            # # 开始验证模型
+            # Start validating the model
             model.eval()
             test_accs_rna = []
             test_accs_atac = []
@@ -253,17 +236,17 @@ def pretrain(rna_path, atac_path, save_path, label_path):
                 labels = labels.to(device)
 
                 with torch.no_grad():
-                    # 设置成预训练模式，该模式会返回分别使用两种模态数据的预测结果
+                    # Set to pretrain mode, which returns prediction results using both modal data
                     logits_rna, logits_atac = model(x_rna=data_rna, x_atac=data_atac, ope='pretrain')
 
-                # 获取分别使用两个模态数据的测试预测结果
+                # Get test prediction results using both modal data
                 preds_rna = logits_rna.argmax(1)
                 preds_rna = preds_rna.cpu().numpy().tolist()
                 preds_atac = logits_atac.argmax(1)
                 preds_atac = preds_atac.cpu().numpy().tolist()
                 labels = labels.cpu().numpy().tolist()
 
-                # 计算评价指标
+                # Calculate evaluation metrics
                 acc_rna = accuracy_score(labels, preds_rna)
                 acc_atac = accuracy_score(labels, preds_atac)
                 f1_rna = f1_score(labels, preds_rna, average='macro')
@@ -290,8 +273,8 @@ def pretrain(rna_path, atac_path, save_path, label_path):
                 f"test_f1_atac = {test_f1_atac:.5f}"
             )
 
-            # 之前的pred_rna、pred_atac以及ground_truth保存的是细胞类型的数字编号
-            # 这里需要转换成真实的细胞类型的名称字符串
+            # The previous pred_rna, pred_atac, and ground_truth store the numerical labels of cell types
+            # Here they need to be converted to the string names of the actual cell types
             pred_rna_str = []
             pred_atac_str = []
             ground_truth_str = []
@@ -302,7 +285,7 @@ def pretrain(rna_path, atac_path, save_path, label_path):
             for i in pred_atac:
                 pred_atac_str.append(cell_types[i])
 
-            # 保存预测的细胞类型和scMoAnno模型
+            # Save the predicted cell types and the scMoAnno model
             log_dir = save_path + 'log/'
             if not os.path.isdir(log_dir):
                 os.makedirs(log_dir)
@@ -327,22 +310,21 @@ def pretrain(rna_path, atac_path, save_path, label_path):
                 f.writelines("acc_atac:" + str(test_acc_atac) + "\n")
                 f.writelines('f1_atac:' + str(test_f1_atac) + "\n")
 
-        if fold == 1:
+        if fold == 5:
             break
 
-
-# # 提取多模态特征的函数
+# Function to extract multimodal features
 def extraction_feature(rna_path, atac_path, pretrained_path, save_path, label_path):
     global labels, cell_types
     adata_rna = sc.read_h5ad(rna_path)
     adata_atac = sc.read_h5ad(atac_path)
 
-    # # 获取对齐的scRNA-seq和scATAC-seq数据的细胞类型标签
+    # Get the cell type labels of aligned scRNA-seq and scATAC-seq data
     if label_path is not None:
-        # 所有细胞的种类（cell1: A, cell2: B, cell3: A...）
+        # Types of all cells (cell1: A, cell2: B, cell3: A...)
         labels, cell_types = read_label(label_path)
 
-    # 读取scRNA-seq和scATAC-seq数据
+    # Read scRNA-seq and scATAC-seq data
     adata_rna = adata_rna.X
     adata_atac = adata_atac.X
 
@@ -351,21 +333,21 @@ def extraction_feature(rna_path, atac_path, pretrained_path, save_path, label_pa
     if not isinstance(adata_atac, np.ndarray):
         adata_atac = adata_atac.toarray()
 
-    print('读完数据了')
+    print('Data reading completed')
 
-    # # 设置FusionRNATAC数据融合预训练模型的超参数
-    # 获取读入的scRNA-seq和scATAC-seq数据的特征维度(cell, feature)，所以shape[1]
+    # Set hyperparameters for the FusionRNATAC data fusion pretraining model
+    # Get the feature dimensions of the input scRNA-seq and scATAC-seq data (cell, feature), so use shape[1]
     rna_input_size = adata_rna.shape[1]
     atac_input_size = adata_atac.shape[1]
     rna_output_size = rna_input_size
     atac_output_size = atac_input_size
-    # 数据融合后的特征维度
+    # Dimensionality of fused features
     pretrained_gap = 2048
     gap = 2048
 
-    lr = 0.00008  # 学习率
-    dp = 0.15  # 丢弃率
-    n_epochs = 30  # 预测模型训练轮数
+    lr = 0.00008  # Learning rate
+    dp = 0.15  # Dropout rate
+    n_epochs = 30  # Number of training epochs for the prediction model
     n_head = 64
 
     adata_rna = np.asarray(adata_rna)
@@ -374,7 +356,7 @@ def extraction_feature(rna_path, atac_path, pretrained_path, save_path, label_pa
     print('rna: ' + str(rna_input_size))
     print('atac: ' + str(atac_input_size))
 
-    # 创建scMoAnnoPretrain交叉注意力特征提取预训练模型
+    # Create the scMoAnnoPretrain cross-attention feature extraction pretrained model
     model_pretrained = scMoAnnoPretrain(
         input_rna=rna_input_size,
         input_atac=atac_input_size,
@@ -384,14 +366,14 @@ def extraction_feature(rna_path, atac_path, pretrained_path, save_path, label_pa
         n_head=n_head
     ).float().to(device)
 
-    # 加载预训练模型参数
+    # Load pretrained model parameters
     checkpoint = torch.load(pretrained_path)
     model_pretrained.load_state_dict(checkpoint)
 
-    # 将预训练模型设置成评估模式
+    # Set the pretrained model to evaluation mode
     model_pretrained.eval()
 
-    # 创建scMoAnno预测模型
+    # Create the scMoAnno prediction model
     model = scMoAnno(
         input_rna=rna_input_size,
         input_atac=atac_input_size,
@@ -401,35 +383,20 @@ def extraction_feature(rna_path, atac_path, pretrained_path, save_path, label_pa
         n_head=n_head
     ).float().to(device)
 
-    # 预测模型使用交叉熵损失函数
+    # The prediction model uses cross-entropy loss function
     criterion = nn.CrossEntropyLoss()
-    # 设置优化器函数
+    # Set the optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
 
-    # 根据细胞数量设置不同批次大小
-    # batch_sizes = 256
+    # Set different batch sizes according to the number of cells
     batch_sizes = 256 if len(adata_rna) > 5000 else 128
 
-    # 模型设置5-KFold
+    # 5-KFold cross-validation setup
     skf = StratifiedKFold(n_splits=5, random_state=seed, shuffle=True)
     fold = 0
 
     for train_index, test_index in skf.split(adata_atac, labels):
         fold = fold + 1
-        # X_rna_train, X_rna_test = adata_rna[train_index], adata_rna[test_index]
-        # X_atac_train, X_atac_test = adata_atac[train_index], adata_atac[test_index]
-        # X_rna_train = np.asarray(X_rna_train)
-        # X_rna_test = np.asarray(X_rna_test)
-        # X_atac_train = np.asarray(X_atac_train)
-        # X_atac_test = np.asarray(X_atac_test)
-        #
-        # y_train, y_test = labels[train_index], labels[test_index]
-        #
-        # y_train = np.asarray(y_train)
-        # y_test = np.asarray(y_test)
-
-
-
         X_rna_train, X_rna_test, X_atac_train, X_atac_test, y_train, y_test = train_test_split(
             adata_rna, adata_atac, labels, test_size=0.2, random_state=seed, shuffle=True, stratify=labels
         )
@@ -440,48 +407,49 @@ def extraction_feature(rna_path, atac_path, pretrained_path, save_path, label_pa
         y_train = np.asarray(y_train)
         y_test = np.asarray(y_test)
 
-        # 设置训练数据集
+        # Set up the training dataset
         train_dataset = Dataset_FusionRNATAC(data_rna=X_rna_train, data_atac=X_atac_train, label=y_train)
         train_loader = DataLoader(train_dataset, batch_size=batch_sizes, shuffle=True, pin_memory=True)
 
-        # 设置测试数据集
+        # Set up the test dataset
         test_dataset = Dataset_FusionRNATAC(data_rna=X_rna_test, data_atac=X_atac_test, label=y_test)
         test_loader = DataLoader(test_dataset, batch_size=batch_sizes, shuffle=False, pin_memory=True)
 
-        # # 开始提取训练数据的新特征并进行预测模型的训练
+        # Start extracting new features from training data and training the prediction model
         model.train()
         for index, epoch in enumerate(range(n_epochs)):
-            # 创建预测模型的训练指标
+            # Create training metrics for the prediction model
             train_loss = []
             train_accs = []
             train_f1s = []
             for batch in tqdm(train_loader):
-                # 加载批次数据
+                # Load batch data
                 data_rna, data_atac, labels = batch
                 data_rna = data_rna.to(device)
                 data_atac = data_atac.to(device)
                 labels = labels.to(device)
 
                 with torch.no_grad():
-                    # 设置成提取特征模式，该模式会返回两种模态数据被交叉注意力预训练后提取新的特征
+                    # Set to feature extraction mode, which returns new features extracted from both modal data
+                    # after cross-attention pretraining
                     f_rna, f_atac = model_pretrained(x_rna=data_rna, x_atac=data_atac, ope='extraction_feature')
                     f_rna = f_rna.reshape(-1, int(rna_input_size / gap), gap)
                     f_atac = f_atac.reshape(-1, int(atac_input_size / gap), gap)
 
-                # # 用新提取的特征去做训练
+                # Use the newly extracted features for training
                 data_rna, data_atac = f_rna, f_atac
-                # 训练预测结果
+                # Training predictions
                 logits = model(data_rna, data_atac)
                 labels = torch.tensor(labels, dtype=torch.long)
                 loss = criterion(logits, labels)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-                # 细胞类型预测结果
+                # Cell type prediction results
                 preds = logits.argmax(1)
                 preds = preds.cpu().numpy()
                 labels = labels.cpu().numpy()
-                # 评价指标
+                # Evaluation metrics
                 acc = accuracy_score(labels, preds)
                 f1 = f1_score(labels, preds, average='macro')
                 train_loss.append(loss.item())
@@ -498,7 +466,7 @@ def extraction_feature(rna_path, atac_path, pretrained_path, save_path, label_pa
                 f"f1 = {train_f1:.5f}"
             )
 
-            # # 开始评估scMoAnno预测模型
+            # Start evaluating the scMoAnno prediction model
             model.eval()
             test_accs = []
             test_f1s = []
@@ -512,23 +480,24 @@ def extraction_feature(rna_path, atac_path, pretrained_path, save_path, label_pa
                 labels = labels.to(device)
 
                 with torch.no_grad():
-                    # 设置成提取特征模式，该模式会返回两种模态数据被交叉注意力预训练后提取新的特征
+                    # Set to feature extraction mode, which returns new features extracted from both modal data
+                    # after cross-attention pretraining
                     f_rna, f_atac = model_pretrained(x_rna=data_rna, x_atac=data_atac, ope='extraction_feature')
                     f_rna = f_rna.reshape(-1, int(rna_input_size / gap), gap)
                     f_atac = f_atac.reshape(-1, int(atac_input_size / gap), gap)
 
-                # # 用新提取的特征去做测试
+                # Use the newly extracted features for testing
                 data_rna, data_atac = f_rna, f_atac
 
                 with torch.no_grad():
                     logits = model(data_rna, data_atac)
 
-                # 获取细胞预测结果
+                # Get cell prediction results
                 preds = logits.argmax(1)
                 preds = preds.cpu().numpy().tolist()
                 labels = labels.cpu().numpy().tolist()
 
-                # 计算评价指标
+                # Calculate evaluation metrics
                 acc = accuracy_score(labels, preds)
                 f1 = f1_score(labels, preds, average='macro')
                 test_f1s.append(f1)
@@ -546,8 +515,8 @@ def extraction_feature(rna_path, atac_path, pretrained_path, save_path, label_pa
                 f"test_f1 = {test_f1:.5f}"
             )
 
-            # 之前的pred以及ground_truth保存的是细胞类型的数字编号
-            # 这里需要转换成真实的细胞类型的名称字符串
+            # The previous pred and ground_truth store the numerical labels of cell types
+            # Here they need to be converted to the string names of the actual cell types
             pred_str = []
             ground_truth_str = []
             for i in ground_truth:
@@ -555,7 +524,7 @@ def extraction_feature(rna_path, atac_path, pretrained_path, save_path, label_pa
             for i in pred:
                 pred_str.append(cell_types[i])
 
-            # 保存预测的细胞类型和scMoAnno模型
+            # Save the predicted cell types and the scMoAnno model
             log_dir = save_path + "log/"
             if not os.path.isdir(log_dir):
                 os.makedirs(log_dir)
@@ -568,6 +537,7 @@ def extraction_feature(rna_path, atac_path, pretrained_path, save_path, label_pa
             if not os.path.isdir(model_dir):
                 os.makedirs(model_dir)
 
+            # The following lines are commented out as per the original code
             # np.save(log_dir + 'ground_truth/epoch_' + str(index + 1) + '_true_label_val.npy', ground_truth_str)
             # np.save(log_dir + 'pred_rna/epoch_' + str(index + 1) + '_pred_label_val.npy', pred_str)
             # torch.save(model.state_dict(), model_dir + 'epoch_' + str(index + 1) + '_scMoAnno_prediction.pth')
@@ -581,13 +551,13 @@ def extraction_feature(rna_path, atac_path, pretrained_path, save_path, label_pa
             break
 
 
-# # 设定不同数据集名称，方便切换数据集进行训练
+# Set different dataset names to facilitate switching between datasets for training
 def selection_dataset(dataset_name):
     global rna_path, atac_path, pretrained_path, save_path_pretrain, save_path_extraction_feature, label_path
 
     rna_path = '../../data/' + dataset_name + '/rna.h5ad'
     atac_path = '../../data/' + dataset_name + '/atac.h5ad'
-    pretrained_path = '../../data/' + dataset_name + '/results/pretrain/pretrained/epoch_1_scMoAnno_pretrained.pth'
+    pretrained_path = '../../data/' + dataset_name + '/results/pretrain/pretrained/epoch_30_scMoAnno_pretrained.pth'
     save_path_pretrain = '../../data/' + dataset_name + '/results/pretrain/'
     save_path_extraction_feature = '../../data/' + dataset_name + '/results/extraction_feature/'
     label_path = '../../data/' + dataset_name + '/Label.csv'
@@ -595,11 +565,11 @@ def selection_dataset(dataset_name):
     return rna_path, atac_path, pretrained_path, save_path_pretrain, save_path_extraction_feature, label_path
 
 
-# # 直接在这里设定要进行训练的数据集名称：
+# Directly set the name of the dataset to be trained here:
 dataset_name = 'bmmc'
 
 
-# # 控制执行预训练的函数入口
+# Entry function to control the execution of pretraining
 def execute_pretrain():
     (rna_path, atac_path, pretrained_path, save_path_pretrain,
      save_path_extraction_feature, label_path) = selection_dataset(dataset_name)
@@ -607,7 +577,7 @@ def execute_pretrain():
     pretrain(rna_path, atac_path, save_path_pretrain, label_path)
 
 
-# # 控制执行提取多模态特征的函数入口
+# Entry function to control the execution of multimodal feature extraction
 def execute_extraction_feature():
     (rna_path, atac_path, pretrained_path, save_path_pretrain,
      save_path_extraction_feature, label_path) = selection_dataset(dataset_name)
@@ -616,5 +586,5 @@ def execute_extraction_feature():
 
 
 if __name__ == '__main__':
-    # execute_pretrain()
+    execute_pretrain()
     execute_extraction_feature()
